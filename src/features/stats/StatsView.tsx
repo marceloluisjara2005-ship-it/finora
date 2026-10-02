@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   FileText,
   Sparkles,
@@ -12,6 +12,11 @@ import {
   Layers,
   ArrowRight,
   ShieldAlert,
+  FileDown,
+  Share2,
+  Download,
+  X,
+  CheckCircle2,
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -28,6 +33,7 @@ import {
 import type { Category, Transaction } from '../../types/finance';
 import { formatCurrency, formatCompactCurrency } from '../../lib/currency';
 import { formatMonthLabel, getPreviousMonth } from '../../lib/dates';
+import { downloadFinancialPDF, shareFinancialPDF } from '../../lib/pdfReport';
 
 interface StatsViewProps {
   currentPeriod: string;
@@ -35,6 +41,9 @@ interface StatsViewProps {
   categories: Category[];
   privacyMode: boolean;
   onAskGemini: (prompt: string) => Promise<string>;
+  currency?: string;
+  userName?: string;
+  userEmail?: string;
 }
 
 export const StatsView: React.FC<StatsViewProps> = ({
@@ -43,9 +52,28 @@ export const StatsView: React.FC<StatsViewProps> = ({
   categories,
   privacyMode,
   onAskGemini,
+  currency = 'ARS',
+  userName = 'Usuario Finora',
+  userEmail,
 }) => {
   const [isGeneratingAI, setIsGeneratingAI] = useState(false);
   const [aiReport, setAiReport] = useState<string | null>(null);
+
+  // PDF Export Modal State
+  const [showPDFModal, setShowPDFModal] = useState(false);
+  const [isExportingPDF, setIsExportingPDF] = useState(false);
+  const [pdfStatusMessage, setPdfStatusMessage] = useState<string | null>(null);
+  const [includeAIReportInPDF, setIncludeAIReportInPDF] = useState(true);
+
+  // Close modal on Escape key
+  useEffect(() => {
+    if (!showPDFModal) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setShowPDFModal(false);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [showPDFModal]);
 
   const categoryMap = useMemo(() => {
     const map = new Map<string, Category>();
@@ -187,23 +215,204 @@ Mantén un tono profesional, claro, empático y estructurado en viñetas cortas.
     window.print();
   };
 
+  const handleDownloadPDF = () => {
+    try {
+      setIsExportingPDF(true);
+      setPdfStatusMessage(null);
+      downloadFinancialPDF({
+        currentPeriod,
+        currency,
+        stats,
+        transactions: currentMonthTx,
+        categories,
+        aiReport: includeAIReportInPDF ? aiReport : null,
+        userName,
+        userEmail,
+      });
+      setPdfStatusMessage('¡Resumen en PDF descargado exitosamente!');
+      setTimeout(() => {
+        setPdfStatusMessage(null);
+      }, 4000);
+    } catch (err: any) {
+      console.error('Download PDF error:', err);
+      setPdfStatusMessage('Ocurrió un error al generar el PDF.');
+    } finally {
+      setIsExportingPDF(false);
+    }
+  };
+
+  const handleSharePDF = async () => {
+    try {
+      setIsExportingPDF(true);
+      setPdfStatusMessage(null);
+      const shared = await shareFinancialPDF({
+        currentPeriod,
+        currency,
+        stats,
+        transactions: currentMonthTx,
+        categories,
+        aiReport: includeAIReportInPDF ? aiReport : null,
+        userName,
+        userEmail,
+      });
+      if (shared) {
+        setPdfStatusMessage('¡Documento compartido exitosamente!');
+      } else {
+        setPdfStatusMessage('PDF descargado al dispositivo para que puedas enviarlo.');
+      }
+      setTimeout(() => {
+        setPdfStatusMessage(null);
+      }, 4000);
+    } catch (err: any) {
+      console.error('Share PDF error:', err);
+      setPdfStatusMessage('No se pudo compartir el archivo.');
+    } finally {
+      setIsExportingPDF(false);
+    }
+  };
+
   return (
     <div className="space-y-5 pb-24 animate-in fade-in duration-300">
-      {/* Header and Print Action */}
+      {/* Header and Print/Export Actions */}
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-base font-bold text-[#F5F7FC]">Informe Contable Mensual</h2>
           <span className="text-xs text-[#929BAD]">{formatMonthLabel(currentPeriod)}</span>
         </div>
-        <button
-          onClick={handlePrint}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#171D2B] hover:bg-[#202738] border border-[#262E3D] text-xs font-medium text-[#F5F7FC] transition-colors"
-          title="Imprimir informe contable"
-        >
-          <Printer className="w-3.5 h-3.5 text-[#5687F5]" />
-          <span>Imprimir / PDF</span>
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowPDFModal(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#5687F5] hover:bg-[#4374E0] active:scale-95 text-white text-xs font-semibold shadow-[0_2px_10px_rgba(86,135,245,0.3)] transition-all cursor-pointer"
+            title="Generar resumen en formato PDF para guardar o compartir"
+          >
+            <FileDown className="w-3.5 h-3.5" />
+            <span>Exportar PDF</span>
+          </button>
+        </div>
       </div>
+
+      {/* PDF Export Modal */}
+      {showPDFModal && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="pdf-modal-title"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setShowPDFModal(false);
+          }}
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in overflow-y-auto"
+        >
+          <div className="w-full max-w-sm max-h-[90vh] overflow-y-auto bg-[#0E131F] border border-[#1F293D] rounded-3xl p-6 shadow-2xl relative my-auto text-left">
+            {/* Modal Header */}
+            <div className="flex items-start justify-between gap-3 mb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-[#5687F5]/20 border border-[#5687F5]/30 flex items-center justify-center text-[#5687F5] shrink-0">
+                  <FileText className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 id="pdf-modal-title" className="text-base font-bold text-white tracking-tight">
+                    Resumen en Formato PDF
+                  </h3>
+                  <p className="text-xs text-gray-400">{formatMonthLabel(currentPeriod)}</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowPDFModal(false)}
+                className="p-1.5 rounded-full text-gray-400 hover:text-white hover:bg-[#161F33] transition-colors"
+                aria-label="Cerrar ventana"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Quick Summary Preview Box */}
+            <div className="p-3.5 rounded-2xl bg-[#121826] border border-[#1F293D] mb-4 space-y-2">
+              <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider block">
+                Datos incluidos en el informe
+              </span>
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div className="p-2 rounded-xl bg-[#080B12] border border-[#1F293D]">
+                  <span className="text-gray-400 block text-[10px]">Ingresos</span>
+                  <span className="font-bold text-emerald-400">
+                    {formatCurrency(stats.income, currency, privacyMode)}
+                  </span>
+                </div>
+                <div className="p-2 rounded-xl bg-[#080B12] border border-[#1F293D]">
+                  <span className="text-gray-400 block text-[10px]">Gastos</span>
+                  <span className="font-bold text-rose-400">
+                    {formatCurrency(stats.expense, currency, privacyMode)}
+                  </span>
+                </div>
+                <div className="p-2 rounded-xl bg-[#080B12] border border-[#1F293D]">
+                  <span className="text-gray-400 block text-[10px]">Balance Neto</span>
+                  <span className={`font-bold ${stats.netBalance >= 0 ? 'text-[#5687F5]' : 'text-rose-400'}`}>
+                    {formatCurrency(stats.netBalance, currency, privacyMode)}
+                  </span>
+                </div>
+                <div className="p-2 rounded-xl bg-[#080B12] border border-[#1F293D]">
+                  <span className="text-gray-400 block text-[10px]">Tasa de Ahorro</span>
+                  <span className="font-bold text-white">{stats.savingsRate}%</span>
+                </div>
+              </div>
+
+              {aiReport && (
+                <label className="flex items-center gap-2 pt-1 text-xs text-gray-300 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={includeAIReportInPDF}
+                    onChange={(e) => setIncludeAIReportInPDF(e.target.checked)}
+                    className="rounded border-[#1F293D] text-[#5687F5] focus:ring-0"
+                  />
+                  <span>Incluir observaciones de Auditoría IA</span>
+                </label>
+              )}
+            </div>
+
+            {/* Status Message */}
+            {pdfStatusMessage && (
+              <div className="mb-4 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-start gap-2 text-xs text-emerald-300 animate-fade-in">
+                <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400 mt-0.5" />
+                <span>{pdfStatusMessage}</span>
+              </div>
+            )}
+
+            {/* Actions */}
+            <div className="space-y-2.5">
+              <button
+                type="button"
+                disabled={isExportingPDF}
+                onClick={handleDownloadPDF}
+                className="w-full py-3 px-4 rounded-xl bg-[#5687F5] hover:bg-[#4374E0] disabled:opacity-50 text-white text-xs font-semibold shadow-[0_2px_10px_rgba(86,135,245,0.3)] transition-all flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <Download className="w-4 h-4" />
+                <span>{isExportingPDF ? 'Generando PDF...' : 'Guardar en este dispositivo (PDF)'}</span>
+              </button>
+
+              <button
+                type="button"
+                disabled={isExportingPDF}
+                onClick={handleSharePDF}
+                className="w-full py-3 px-4 rounded-xl bg-[#161F33] hover:bg-[#202B47] disabled:opacity-50 text-white text-xs font-semibold border border-[#28354D] transition-all flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <Share2 className="w-4 h-4 text-[#5687F5]" />
+                <span>Compartir PDF (WhatsApp / Mail / AirDrop)</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setShowPDFModal(false);
+                  handlePrint();
+                }}
+                className="w-full py-2.5 text-center text-xs text-gray-400 hover:text-white transition-colors flex items-center justify-center gap-1.5"
+              >
+                <Printer className="w-3.5 h-3.5" />
+                <span>Imprimir vista contable</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Comparative Cards */}
       <div className="grid grid-cols-2 gap-3">
@@ -315,7 +524,7 @@ Mantén un tono profesional, claro, empático y estructurado en viñetas cortas.
                   <span className="text-[#F5F7FC]">Gastos Fijos</span>
                 </div>
                 <span className="font-semibold text-[#F5F7FC]">
-                  {formatCurrency(stats.fixedExpense, 'ARS', privacyMode)}
+                  {formatCurrency(stats.fixedExpense, currency, privacyMode)}
                 </span>
               </div>
               <div className="flex items-center justify-between text-xs">
@@ -324,7 +533,7 @@ Mantén un tono profesional, claro, empático y estructurado en viñetas cortas.
                   <span className="text-[#F5F7FC]">Gastos Variables</span>
                 </div>
                 <span className="font-semibold text-[#F5F7FC]">
-                  {formatCurrency(stats.variableExpense, 'ARS', privacyMode)}
+                  {formatCurrency(stats.variableExpense, currency, privacyMode)}
                 </span>
               </div>
               <div className="flex items-center justify-between text-xs">
@@ -333,7 +542,7 @@ Mantén un tono profesional, claro, empático y estructurado en viñetas cortas.
                   <span className="text-[#D8A4FF]">Gastos Hormiga</span>
                 </div>
                 <span className="font-semibold text-[#D8A4FF]">
-                  {formatCurrency(stats.antExpense, 'ARS', privacyMode)}
+                  {formatCurrency(stats.antExpense, currency, privacyMode)}
                 </span>
               </div>
             </div>
@@ -354,7 +563,7 @@ Mantén un tono profesional, claro, empático y estructurado en viñetas cortas.
                 <div className="flex items-center gap-2">
                   <span className="text-[#929BAD] text-[11px]">{c.percent}%</span>
                   <span className="font-bold text-[#F5F7FC]">
-                    {formatCurrency(c.amount, 'ARS', privacyMode)}
+                    {formatCurrency(c.amount, currency, privacyMode)}
                   </span>
                 </div>
               </div>
@@ -395,9 +604,22 @@ Mantén un tono profesional, claro, empático y estructurado en viñetas cortas.
         {aiReport ? (
           <div className="mt-3 p-4 rounded-2xl bg-[#080B12]/80 border border-[#262E3D] text-xs text-[#F5F7FC] leading-relaxed whitespace-pre-wrap">
             {aiReport}
-            <div className="mt-3 pt-3 border-t border-[#262E3D] flex items-center gap-1.5 text-[10px] text-[#929BAD]">
-              <ShieldAlert className="w-3.5 h-3.5 text-[#FBBF24]" />
-              <span>Nota: Las observaciones generadas son interpretaciones analíticas descriptivas y no constituyen asesoramiento financiero vinculante.</span>
+            <div className="mt-3 pt-3 border-t border-[#262E3D] flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-1.5 text-[10px] text-[#929BAD]">
+                <ShieldAlert className="w-3.5 h-3.5 text-[#FBBF24] shrink-0" />
+                <span>Observaciones descriptivas sin validez vinculante.</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setIncludeAIReportInPDF(true);
+                  setShowPDFModal(true);
+                }}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#5687F5]/20 hover:bg-[#5687F5]/30 text-[#5687F5] text-xs font-semibold shrink-0 transition-colors cursor-pointer"
+              >
+                <FileDown className="w-3.5 h-3.5" />
+                <span>Exportar con Auditoría a PDF</span>
+              </button>
             </div>
           </div>
         ) : (

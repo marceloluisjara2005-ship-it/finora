@@ -19,6 +19,9 @@ import {
   Archive,
   ArrowRight,
   ShieldAlert,
+  LogOut,
+  Cloud,
+  Laptop,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import type { Account, Category, Debt, FinancialGroup, SavingsGoal, UserProfile } from '../../types/finance';
@@ -32,6 +35,9 @@ interface ProfileViewProps {
   savingsGoals: SavingsGoal[];
   debts: Debt[];
   privacyMode: boolean;
+  isCloudSession?: boolean;
+  onOpenAuth?: () => void;
+  onSignOut?: () => void;
   onAddAccount: (acc: Omit<Account, 'id' | 'userId' | 'createdAt'>) => Promise<void>;
   onAddSavingsGoal: (goal: Omit<SavingsGoal, 'id' | 'userId' | 'createdAt' | 'currentAmount' | 'status'>) => Promise<void>;
   onContributeSavings: (goalId: string, amount: number) => Promise<void>;
@@ -51,6 +57,9 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   savingsGoals,
   debts,
   privacyMode,
+  isCloudSession = false,
+  onOpenAuth,
+  onSignOut,
   onAddAccount,
   onAddSavingsGoal,
   onContributeSavings,
@@ -280,14 +289,25 @@ Responde de forma concisa, profesional, empática y en viñetas directas. Recuer
       {/* 1. Profile Section */}
       {activeSection === 'profile' && (
         <div className="space-y-4">
-          <div className="p-5 rounded-3xl bg-[#171D2B] border border-[#262E3D] flex items-center justify-between">
+          <div className="p-5 rounded-3xl bg-[#171D2B] border border-[#262E3D] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="flex items-center gap-4">
-              <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-[#3B82F6] to-[#5687F5] flex items-center justify-center text-white text-xl font-bold shadow-lg">
-                {profile.displayName.charAt(0)}
+              <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-[#3B82F6] to-[#5687F5] flex items-center justify-center text-white text-xl font-bold shadow-lg shrink-0">
+                {profile.displayName.charAt(0).toUpperCase()}
               </div>
               <div>
-                <h3 className="text-sm font-bold text-[#F5F7FC]">{profile.displayName}</h3>
-                <p className="text-xs text-[#929BAD]">{profile.email}</p>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm font-bold text-[#F5F7FC]">{profile.displayName}</h3>
+                  {isCloudSession ? (
+                    <span className="inline-flex items-center gap-1 text-[9px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 font-semibold">
+                      <Cloud className="w-2.5 h-2.5" /> Supabase
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 text-[9px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/30 font-semibold">
+                      <Laptop className="w-2.5 h-2.5" /> Modo Local
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-[#929BAD] mt-0.5">{profile.email}</p>
                 <div className="flex items-center gap-2 mt-1.5">
                   <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#101522] text-[#5687F5] border border-[#262E3D]">
                     {profile.primaryCurrency}
@@ -299,12 +319,33 @@ Responde de forma concisa, profesional, empática y en viñetas directas. Recuer
               </div>
             </div>
 
-            <button
-              onClick={() => setIsEditProfileOpen(true)}
-              className="px-3 py-1.5 rounded-xl bg-[#101522] hover:bg-[#202738] border border-[#262E3D] text-xs font-semibold text-[#F5F7FC] transition-colors"
-            >
-              Editar
-            </button>
+            <div className="flex items-center gap-2 self-end sm:self-auto">
+              <button
+                onClick={() => setIsEditProfileOpen(true)}
+                className="px-3 py-1.5 rounded-xl bg-[#101522] hover:bg-[#202738] border border-[#262E3D] text-xs font-semibold text-[#F5F7FC] transition-colors"
+              >
+                Editar
+              </button>
+
+              {isCloudSession && onSignOut ? (
+                <button
+                  onClick={onSignOut}
+                  className="px-3 py-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-xs font-semibold text-rose-300 transition-colors flex items-center gap-1.5"
+                  title="Cerrar sesión de Supabase"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                  <span>Salir</span>
+                </button>
+              ) : onOpenAuth ? (
+                <button
+                  onClick={onOpenAuth}
+                  className="px-3 py-1.5 rounded-xl bg-[#5687F5] hover:bg-[#4375E6] text-xs font-semibold text-white transition-colors flex items-center gap-1.5 shadow-[0_0_10px_rgba(86,135,245,0.3)]"
+                >
+                  <Cloud className="w-3.5 h-3.5" />
+                  <span>Conectar Nube</span>
+                </button>
+              ) : null}
+            </div>
           </div>
 
           {/* Quick Metrics Audit */}

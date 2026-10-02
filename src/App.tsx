@@ -20,6 +20,7 @@ import type {
 } from './types/finance';
 import { getCurrentMonthPeriod } from './lib/dates';
 import { enqueueOutboxOperation, initBackgroundSyncListener } from './lib/sync';
+import { getCurrentSession, signOut } from './lib/supabase';
 
 // Components
 import { Header } from './components/navigation/Header';
@@ -27,6 +28,7 @@ import { TabBar, type NavTab } from './components/navigation/TabBar';
 import { OfflineIndicator } from './components/ui/OfflineIndicator';
 import { NotificationsModal } from './components/feedback/NotificationsModal';
 import { TransactionFormModal } from './features/transactions/TransactionFormModal';
+import { AuthModal } from './components/auth/AuthModal';
 import { ViewSkeleton } from './components/ui/ViewSkeleton';
 
 // Views
@@ -54,6 +56,8 @@ export default function App() {
   // Modals state
   const [isQuickAddOpen, setIsQuickAddOpen] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const [isAuthOpen, setIsAuthOpen] = useState(false);
+  const [isCloudSession, setIsCloudSession] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // Financial Domain State
@@ -76,7 +80,8 @@ export default function App() {
   // Reload all records from IndexedDB
   const reloadData = useCallback(async () => {
     try {
-      const p = await db.profiles.get(DEFAULT_USER_ID);
+      const allProfiles = await db.profiles.toArray();
+      const p = allProfiles[0] || (await db.profiles.get(DEFAULT_USER_ID));
       const accList = await db.accounts.toArray();
       const catList = await db.categories.toArray();
       const txList = await db.transactions.toArray();
@@ -111,6 +116,30 @@ export default function App() {
       try {
         await seedDatabaseIfEmpty();
         await reloadData();
+
+        // Check if there is an active Supabase Auth session
+        const { session, user } = await getCurrentSession();
+        if (session && user) {
+          setIsCloudSession(true);
+          const cloudProfile: UserProfile = {
+            id: user.id,
+            email: user.email || 'usuario@finora.app',
+            displayName: user.user_metadata?.full_name || user.email?.split('@')[0] || 'Usuario Finora',
+            primaryCurrency: 'ARS',
+            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Argentina/Buenos_Aires',
+            privacyModeEnabled: false,
+            createdAt: user.created_at || new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          };
+          setProfile(cloudProfile);
+          await db.profiles.put(cloudProfile);
+        } else {
+          // If no active cloud session and first time without choice, show auth modal
+          const hasGuestChoice = localStorage.getItem('finora_guest_mode');
+          if (!hasGuestChoice) {
+            setIsAuthOpen(true);
+          }
+        }
       } catch (err) {
         console.error('Error during init:', err);
       } finally {
@@ -137,6 +166,35 @@ export default function App() {
     if (profile) {
       await db.profiles.update(profile.id, { privacyModeEnabled: nextVal });
     }
+  };
+
+  // Auth Handlers
+  const handleAuthSuccess = async (userProf: UserProfile, isCloud: boolean) => {
+    setIsCloudSession(isCloud);
+    setProfile(userProf);
+    localStorage.setItem('finora_guest_mode', 'true');
+    await db.profiles.put(userProf);
+    setIsAuthOpen(false);
+    showToast(
+      isCloud
+        ? `¡Bienvenido ${userProf.displayName}! Sesión iniciada con Supabase.`
+        : `Perfil local guardado.`
+    );
+    await reloadData();
+  };
+
+  const handleSignOut = async () => {
+    await signOut();
+    setIsCloudSession(false);
+    localStorage.removeItem('finora_guest_mode');
+    showToast('Sesión de Supabase cerrada.');
+    setIsAuthOpen(true);
+  };
+
+  const handleContinueOfflineGuest = () => {
+    localStorage.setItem('finora_guest_mode', 'true');
+    setIsAuthOpen(false);
+    showToast('Ingresaste en modo local sin conexión.');
   };
 
   // 1. Transaction Creation Handler
@@ -635,6 +693,9 @@ export default function App() {
         onTogglePrivacy={handleTogglePrivacy}
         unreadCount={unreadNotificationsCount}
         onOpenNotifications={() => setIsNotificationsOpen(true)}
+        userEmail={profile?.email}
+        isCloudSession={isCloudSession}
+        onOpenAuth={() => setIsAuthOpen(true)}
       />
 
       {/* Main View Port Container */}
@@ -672,6 +733,9 @@ export default function App() {
               categories={categories}
               privacyMode={privacyMode}
               onAskGemini={handleAskGemini}
+              currency={profile?.primaryCurrency || 'ARS'}
+              userName={profile?.displayName}
+              userEmail={profile?.email}
             />
           )}
 
@@ -685,6 +749,8 @@ export default function App() {
               privacyMode={privacyMode}
               onAddBudget={handleAddBudget}
               onPayInstallment={handlePayInstallment}
+              currency={profile?.primaryCurrency || 'ARS'}
+              onRefreshNotifications={reloadData}
             />
           )}
 
@@ -696,6 +762,9 @@ export default function App() {
               savingsGoals={savingsGoals}
               debts={debts}
               privacyMode={privacyMode}
+              isCloudSession={isCloudSession}
+              onOpenAuth={() => setIsAuthOpen(true)}
+              onSignOut={handleSignOut}
               onAddAccount={handleAddAccount}
               onAddSavingsGoal={handleAddSavingsGoal}
               onContributeSavings={handleContributeSavings}
@@ -710,6 +779,15 @@ export default function App() {
           )}
         </React.Suspense>
       </main>
+
+      {/* Supabase Authentication & Account Modal */}
+      <AuthModal
+        isOpen={isAuthOpen}
+        onClose={() => setIsAuthOpen(false)}
+        canDismiss={Boolean(profile)}
+        onAuthSuccess={handleAuthSuccess}
+        onContinueOfflineGuest={handleContinueOfflineGuest}
+      />
 
       {/* Floating Bottom Sheet for Transaction Registration */}
       <TransactionFormModal

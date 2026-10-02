@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   SlidersHorizontal,
   Plus,
@@ -9,11 +9,29 @@ import {
   X,
   CreditCard,
   ChevronRight,
+  Bell,
+  BellRing,
+  Settings,
+  Clock,
+  Smartphone,
+  Inbox,
+  Check,
 } from 'lucide-react';
 import type { Budget, Category, InstallmentPlan, Installment } from '../../types/finance';
 import { formatCurrency } from '../../lib/currency';
 import { getDueStatus, formatMonthLabel } from '../../lib/dates';
 import { CategoryIcon } from '../../components/ui/CategoryIcon';
+import {
+  getInstallmentReminderSettings,
+  saveInstallmentReminderSettings,
+  requestPushPermission,
+  getPushPermission,
+  isPushSupported,
+  testSampleInstallmentReminder,
+  checkAndDispatchInstallmentReminders,
+  getUpcomingInstallments,
+  type InstallmentReminderSettings,
+} from '../../lib/installmentReminders';
 
 interface BudgetsViewProps {
   currentPeriod: string;
@@ -30,6 +48,8 @@ interface BudgetsViewProps {
     limitAmount: number;
   }) => Promise<void>;
   onPayInstallment: (installmentId: string) => Promise<void>;
+  currency?: string;
+  onRefreshNotifications?: () => void;
 }
 
 export const BudgetsView: React.FC<BudgetsViewProps> = ({
@@ -41,15 +61,91 @@ export const BudgetsView: React.FC<BudgetsViewProps> = ({
   privacyMode,
   onAddBudget,
   onPayInstallment,
+  currency = 'ARS',
+  onRefreshNotifications,
 }) => {
   const [activeTab, setActiveTab] = useState<'budgets' | 'installments'>('budgets');
   const [isAddBudgetOpen, setIsAddBudgetOpen] = useState(false);
+
+  // Installment Reminders State
+  const [reminderSettings, setReminderSettings] = useState<InstallmentReminderSettings>(() =>
+    getInstallmentReminderSettings()
+  );
+  const [isReminderModalOpen, setIsReminderModalOpen] = useState(false);
+  const [isTestingReminder, setIsTestingReminder] = useState(false);
+  const [testFeedback, setTestFeedback] = useState<string | null>(null);
+  const [pushPerm, setPushPerm] = useState<NotificationPermission | 'unsupported'>(() =>
+    getPushPermission()
+  );
 
   // New Budget Form State
   const [name, setName] = useState('');
   const [targetType, setTargetType] = useState<'general' | 'category' | 'group'>('general');
   const [targetId, setTargetId] = useState('');
   const [limitStr, setLimitStr] = useState('');
+
+  // Close modals on Escape key
+  useEffect(() => {
+    if (!isReminderModalOpen && !isAddBudgetOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setIsReminderModalOpen(false);
+        setIsAddBudgetOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isReminderModalOpen, isAddBudgetOpen]);
+
+  // Check and dispatch due installment alerts on mount and updates
+  useEffect(() => {
+    checkAndDispatchInstallmentReminders(installmentPlans, installments, currency).then((res) => {
+      if (res.dispatched > 0) {
+        onRefreshNotifications?.();
+      }
+    });
+  }, [installmentPlans, installments, currency, onRefreshNotifications]);
+
+  const upcomingInstallments = useMemo(() => {
+    return getUpcomingInstallments(installmentPlans, installments, 14);
+  }, [installmentPlans, installments]);
+
+  const handleUpdateReminderSettings = (newSettings: Partial<InstallmentReminderSettings>) => {
+    const updated = { ...reminderSettings, ...newSettings };
+    setReminderSettings(updated);
+    saveInstallmentReminderSettings(updated);
+  };
+
+  const handleTogglePlanReminder = (planId: string) => {
+    const currentVal = reminderSettings.customPlanAlerts[planId] !== false;
+    const nextCustom = { ...reminderSettings.customPlanAlerts, [planId]: !currentVal };
+    handleUpdateReminderSettings({ customPlanAlerts: nextCustom });
+  };
+
+  const handleRequestPush = async () => {
+    const perm = await requestPushPermission();
+    setPushPerm(perm);
+    if (perm === 'granted') {
+      handleUpdateReminderSettings({ notifyPush: true });
+    }
+  };
+
+  const handleTestReminder = async () => {
+    setIsTestingReminder(true);
+    setTestFeedback(null);
+    try {
+      const samplePlan = installmentPlans[0]?.description || 'Compra en Cuotas';
+      const sampleAmount = installments.find((i) => i.status !== 'paid')?.amount || 25000;
+      const res = await testSampleInstallmentReminder(samplePlan, sampleAmount, currency);
+      setTestFeedback(res.message);
+      onRefreshNotifications?.();
+      setTimeout(() => setTestFeedback(null), 5000);
+    } catch {
+      setTestFeedback('Error al probar la notificación.');
+    } finally {
+      setIsTestingReminder(false);
+    }
+  };
 
   const categoryMap = React.useMemo(() => {
     const map = new Map<string, Category>();
@@ -98,27 +194,51 @@ export const BudgetsView: React.FC<BudgetsViewProps> = ({
 
   return (
     <div className="space-y-4 pb-24 animate-in fade-in duration-300">
-      {/* Tab Switcher: Presupuestos vs Cuotas */}
-      <div className="grid grid-cols-2 p-1 rounded-2xl bg-[#171D2B] border border-[#262E3D]">
+      {/* Tab Switcher: Presupuestos vs Cuotas & Quick Reminder Action */}
+      <div className="flex items-center gap-2">
+        <div className="grid grid-cols-2 p-1 rounded-2xl bg-[#171D2B] border border-[#262E3D] flex-1">
+          <button
+            onClick={() => setActiveTab('budgets')}
+            className={`py-2 rounded-xl text-xs font-semibold transition-all ${
+              activeTab === 'budgets'
+                ? 'bg-[#5687F5] text-white shadow-sm'
+                : 'text-[#929BAD] hover:text-[#F5F7FC]'
+            }`}
+          >
+            Presupuestos y Límites
+          </button>
+          <button
+            onClick={() => setActiveTab('installments')}
+            className={`py-2 rounded-xl text-xs font-semibold transition-all ${
+              activeTab === 'installments'
+                ? 'bg-[#5687F5] text-white shadow-sm'
+                : 'text-[#929BAD] hover:text-[#F5F7FC]'
+            }`}
+          >
+            Compras en Cuotas ({plansWithDetails.length})
+          </button>
+        </div>
+
+        {/* Global Reminder Shortcut */}
         <button
-          onClick={() => setActiveTab('budgets')}
-          className={`py-2 rounded-xl text-xs font-semibold transition-all ${
-            activeTab === 'budgets'
-              ? 'bg-[#5687F5] text-white shadow-sm'
-              : 'text-[#929BAD] hover:text-[#F5F7FC]'
+          type="button"
+          onClick={() => setIsReminderModalOpen(true)}
+          className={`p-2.5 rounded-2xl border transition-all relative shrink-0 cursor-pointer ${
+            reminderSettings.enabled
+              ? 'bg-[#171D2B] border-[#5687F5]/50 text-[#5687F5] hover:bg-[#202738]'
+              : 'bg-[#171D2B] border-[#262E3D] text-gray-500 hover:text-gray-300'
           }`}
+          title="Configurar recordatorios push y locales para cuotas pendientes"
+          aria-label="Configurar recordatorios de cuotas"
         >
-          Presupuestos y Límites
-        </button>
-        <button
-          onClick={() => setActiveTab('installments')}
-          className={`py-2 rounded-xl text-xs font-semibold transition-all ${
-            activeTab === 'installments'
-              ? 'bg-[#5687F5] text-white shadow-sm'
-              : 'text-[#929BAD] hover:text-[#F5F7FC]'
-          }`}
-        >
-          Compras en Cuotas ({plansWithDetails.length})
+          {reminderSettings.enabled ? (
+            <BellRing className="w-4 h-4 text-[#5687F5]" />
+          ) : (
+            <Bell className="w-4 h-4" />
+          )}
+          {upcomingInstallments.some((u) => u.daysLeft <= reminderSettings.daysBefore) && (
+            <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-rose-500 animate-pulse" />
+          )}
         </button>
       </div>
 
@@ -235,6 +355,56 @@ export const BudgetsView: React.FC<BudgetsViewProps> = ({
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <span className="text-xs text-[#929BAD]">Planes de financiación activos</span>
+            <button
+              type="button"
+              onClick={() => setIsReminderModalOpen(true)}
+              className="text-xs text-[#5687F5] hover:text-[#7FA5FF] flex items-center gap-1 font-medium transition-colors cursor-pointer"
+            >
+              <Bell className="w-3.5 h-3.5" />
+              <span>Recordatorios ({reminderSettings.enabled ? 'Activos' : 'Pausados'})</span>
+            </button>
+          </div>
+
+          {/* Reminder Quick Status Card */}
+          <div className="p-3.5 rounded-2xl bg-gradient-to-r from-[#171D2B] to-[#121826] border border-[#262E3D] flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-xl bg-[#5687F5]/20 flex items-center justify-center text-[#5687F5] shrink-0">
+                <BellRing className="w-4 h-4" />
+              </div>
+              <div>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-bold text-[#F5F7FC]">Recordatorios de Cuotas</span>
+                  <span
+                    className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${
+                      reminderSettings.enabled
+                        ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                        : 'bg-gray-800 text-gray-400 border border-gray-700'
+                    }`}
+                  >
+                    {reminderSettings.enabled
+                      ? reminderSettings.daysBefore === 0
+                        ? 'El mismo día'
+                        : `${reminderSettings.daysBefore}d de anticipación`
+                      : 'Desactivado'}
+                  </span>
+                </div>
+                <p className="text-[10px] text-[#929BAD] mt-0.5">
+                  {reminderSettings.enabled
+                    ? `${reminderSettings.notifyPush ? 'Alertas locales/push' : ''}${
+                        reminderSettings.notifyPush && reminderSettings.notifyInApp ? ' y ' : ''
+                      }${reminderSettings.notifyInApp ? 'Centro de notificaciones' : ''} activas`
+                    : 'Activa recordatorios para no olvidar las fechas de pago'}
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsReminderModalOpen(true)}
+              className="px-2.5 py-1.5 rounded-xl bg-[#202738] hover:bg-[#283247] border border-[#262E3D] text-[11px] font-semibold text-[#F5F7FC] transition-colors flex items-center gap-1 cursor-pointer shrink-0"
+            >
+              <Settings className="w-3.5 h-3.5 text-[#5687F5]" />
+              <span>Configurar</span>
+            </button>
           </div>
 
           <div className="space-y-3">
@@ -250,31 +420,50 @@ export const BudgetsView: React.FC<BudgetsViewProps> = ({
               plansWithDetails.map((plan) => {
                 const nextPending = plan.installments.find((i) => i.status !== 'paid');
                 const dueInfo = nextPending ? getDueStatus(nextPending.dueDate) : null;
+                const isPlanAlertEnabled = reminderSettings.customPlanAlerts[plan.id] !== false;
 
                 return (
                   <div
                     key={plan.id}
                     className="p-4 rounded-3xl bg-[#171D2B] border border-[#262E3D] space-y-3"
                   >
-                    <div className="flex items-start justify-between">
+                    <div className="flex items-start justify-between gap-2">
                       <div className="flex items-center gap-2.5">
-                        <div className="w-9 h-9 rounded-2xl bg-[#5687F5]/20 flex items-center justify-center text-[#5687F5]">
+                        <div className="w-9 h-9 rounded-2xl bg-[#5687F5]/20 flex items-center justify-center text-[#5687F5] shrink-0">
                           <CreditCard className="w-4 h-4" />
                         </div>
                         <div>
-                          <h4 className="text-xs font-bold text-[#F5F7FC]">{plan.description}</h4>
+                          <div className="flex items-center gap-1.5">
+                            <h4 className="text-xs font-bold text-[#F5F7FC]">{plan.description}</h4>
+                            <button
+                              type="button"
+                              onClick={() => handleTogglePlanReminder(plan.id)}
+                              className={`p-1 rounded-md transition-colors ${
+                                isPlanAlertEnabled && reminderSettings.enabled
+                                  ? 'text-[#5687F5] hover:bg-[#5687F5]/20'
+                                  : 'text-gray-500 hover:text-gray-300'
+                              }`}
+                              title={
+                                isPlanAlertEnabled
+                                  ? 'Recordatorio activo para este plan (clic para silenciar)'
+                                  : 'Recordatorio silenciado para este plan (clic para activar)'
+                              }
+                            >
+                              <Bell className="w-3 h-3" />
+                            </button>
+                          </div>
                           <span className="text-[10px] text-[#929BAD]">
                             {plan.paidCount} de {plan.installmentsCount} cuotas abonadas
                           </span>
                         </div>
                       </div>
 
-                      <div className="text-right">
+                      <div className="text-right shrink-0">
                         <span className="text-xs font-bold text-[#F5F7FC] block">
-                          {formatCurrency(plan.totalAmount, 'ARS', privacyMode)}
+                          {formatCurrency(plan.totalAmount, currency, privacyMode)}
                         </span>
                         <span className="text-[10px] text-[#FB7185]">
-                          Resta: {formatCurrency(plan.remainingAmount, 'ARS', privacyMode)}
+                          Resta: {formatCurrency(plan.remainingAmount, currency, privacyMode)}
                         </span>
                       </div>
                     </div>
@@ -285,7 +474,7 @@ export const BudgetsView: React.FC<BudgetsViewProps> = ({
                         <div>
                           <div className="flex items-center gap-1.5">
                             <span className="font-semibold text-[#F5F7FC]">
-                              Cuota #{nextPending.installmentNumber}: {formatCurrency(nextPending.amount, 'ARS', privacyMode)}
+                              Cuota #{nextPending.installmentNumber}: {formatCurrency(nextPending.amount, currency, privacyMode)}
                             </span>
                           </div>
                           {dueInfo && (
@@ -300,7 +489,7 @@ export const BudgetsView: React.FC<BudgetsViewProps> = ({
 
                         <button
                           onClick={() => onPayInstallment(nextPending.id)}
-                          className="px-3 py-1.5 rounded-xl bg-[#4ADE80]/20 hover:bg-[#4ADE80]/30 border border-[#4ADE80]/40 text-[#4ADE80] font-semibold text-xs transition-colors"
+                          className="px-3 py-1.5 rounded-xl bg-[#4ADE80]/20 hover:bg-[#4ADE80]/30 border border-[#4ADE80]/40 text-[#4ADE80] font-semibold text-xs transition-colors cursor-pointer"
                         >
                           Pagar Cuota
                         </button>
@@ -310,6 +499,218 @@ export const BudgetsView: React.FC<BudgetsViewProps> = ({
                 );
               })
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Configurar Recordatorios de Cuotas */}
+      {isReminderModalOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="reminder-modal-title"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setIsReminderModalOpen(false);
+          }}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-fade-in overflow-y-auto"
+        >
+          <div className="w-full max-w-sm max-h-[90vh] overflow-y-auto rounded-3xl bg-[#0E131F] border border-[#1F293D] p-5 sm:p-6 shadow-2xl relative my-auto text-left space-y-4">
+            {/* Header */}
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-[#5687F5]/20 border border-[#5687F5]/30 flex items-center justify-center text-[#5687F5] shrink-0">
+                  <BellRing className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 id="reminder-modal-title" className="text-base font-bold text-white tracking-tight">
+                    Recordatorios de Cuotas
+                  </h3>
+                  <p className="text-xs text-gray-400">Alertas automáticas antes del vencimiento</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsReminderModalOpen(false)}
+                className="p-1.5 rounded-full text-gray-400 hover:text-white hover:bg-[#161F33] transition-colors"
+                aria-label="Cerrar modal"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Main Toggle */}
+            <div className="p-3.5 rounded-2xl bg-[#121826] border border-[#1F293D] flex items-center justify-between">
+              <div>
+                <span className="text-xs font-semibold text-white block">Activar Recordatorios</span>
+                <span className="text-[11px] text-gray-400">Recibe avisos antes de las fechas de corte</span>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={reminderSettings.enabled}
+                  onChange={(e) => handleUpdateReminderSettings({ enabled: e.target.checked })}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#5687F5]"></div>
+              </label>
+            </div>
+
+            {reminderSettings.enabled && (
+              <div className="space-y-4 animate-fade-in">
+                {/* Anticipation selector */}
+                <div>
+                  <label className="block text-xs font-semibold text-gray-300 mb-2 flex items-center gap-1.5">
+                    <Clock className="w-3.5 h-3.5 text-[#5687F5]" />
+                    ¿Con cuánta anticipación avisar?
+                  </label>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {[
+                      { days: 0, label: 'El mismo día' },
+                      { days: 1, label: '1 día antes' },
+                      { days: 2, label: '2 días antes' },
+                      { days: 3, label: '3 días antes' },
+                      { days: 5, label: '5 días antes' },
+                    ].map((opt) => (
+                      <button
+                        key={opt.days}
+                        type="button"
+                        onClick={() => handleUpdateReminderSettings({ daysBefore: opt.days })}
+                        className={`py-2 px-2 rounded-xl text-xs font-medium border text-center transition-all cursor-pointer ${
+                          reminderSettings.daysBefore === opt.days
+                            ? 'bg-[#5687F5] border-[#5687F5] text-white font-semibold shadow-sm'
+                            : 'bg-[#121826] border-[#1F293D] text-gray-300 hover:bg-[#161F33]'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Delivery Channels */}
+                <div>
+                  <span className="block text-xs font-semibold text-gray-300 mb-2">Canales de notificación</span>
+                  <div className="space-y-2">
+                    {/* Push / Local Device Notification */}
+                    <div className="p-3 rounded-2xl bg-[#121826] border border-[#1F293D] flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2.5">
+                        <Smartphone className="w-4 h-4 text-[#5687F5] shrink-0" />
+                        <div>
+                          <span className="text-xs font-medium text-white block">Notificación del Dispositivo</span>
+                          <span className="text-[10px] text-gray-400">
+                            {pushPerm === 'granted'
+                              ? 'Permiso concedido en este navegador'
+                              : pushPerm === 'denied'
+                              ? 'Permiso bloqueado en el navegador'
+                              : 'Requiere permiso del navegador'}
+                          </span>
+                        </div>
+                      </div>
+
+                      {pushPerm === 'granted' ? (
+                        <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                          <input
+                            type="checkbox"
+                            checked={reminderSettings.notifyPush}
+                            onChange={(e) => handleUpdateReminderSettings({ notifyPush: e.target.checked })}
+                            className="sr-only peer"
+                          />
+                          <div className="w-9 h-5 bg-gray-700 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#5687F5]"></div>
+                        </label>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={handleRequestPush}
+                          className="px-2.5 py-1 text-[11px] font-semibold rounded-lg bg-[#5687F5]/20 hover:bg-[#5687F5]/30 text-[#5687F5] border border-[#5687F5]/30 shrink-0 cursor-pointer"
+                        >
+                          Habilitar
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Finora In-App Notification Center */}
+                    <div className="p-3 rounded-2xl bg-[#121826] border border-[#1F293D] flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2.5">
+                        <Inbox className="w-4 h-4 text-[#5687F5] shrink-0" />
+                        <div>
+                          <span className="text-xs font-medium text-white block">Centro de Notificaciones</span>
+                          <span className="text-[10px] text-gray-400">Bandeja in-app (ícono de campana)</span>
+                        </div>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                        <input
+                          type="checkbox"
+                          checked={reminderSettings.notifyInApp}
+                          onChange={(e) => handleUpdateReminderSettings({ notifyInApp: e.target.checked })}
+                          className="sr-only peer"
+                        />
+                        <div className="w-9 h-5 bg-gray-700 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#5687F5]"></div>
+                      </label>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Test Feedback Message */}
+                {testFeedback && (
+                  <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-xs text-emerald-300 flex items-start gap-2 animate-fade-in">
+                    <Check className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                    <span>{testFeedback}</span>
+                  </div>
+                )}
+
+                {/* Test Notification Action */}
+                <button
+                  type="button"
+                  disabled={isTestingReminder}
+                  onClick={handleTestReminder}
+                  className="w-full py-2.5 px-3 rounded-xl bg-[#161F33] hover:bg-[#1E2942] border border-[#28354D] text-xs font-medium text-white flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                >
+                  <Bell className="w-3.5 h-3.5 text-[#5687F5]" />
+                  <span>{isTestingReminder ? 'Enviando prueba...' : 'Enviar alerta de prueba ahora'}</span>
+                </button>
+              </div>
+            )}
+
+            {/* Upcoming Pending Installments preview */}
+            <div>
+              <span className="text-xs font-semibold text-gray-300 block mb-2">
+                Próximas cuotas a vencer ({upcomingInstallments.length})
+              </span>
+              {upcomingInstallments.length === 0 ? (
+                <div className="p-3 rounded-2xl bg-[#121826] border border-[#1F293D] text-center text-xs text-gray-400">
+                  No hay cuotas con vencimiento próximo en los próximos 14 días.
+                </div>
+              ) : (
+                <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
+                  {upcomingInstallments.slice(0, 5).map(({ plan, installment, formattedDue, statusLabel, isUrgent }) => (
+                    <div
+                      key={installment.id}
+                      className="p-2.5 rounded-xl bg-[#121826] border border-[#1F293D] flex items-center justify-between text-xs"
+                    >
+                      <div className="min-w-0 pr-2">
+                        <span className="font-semibold text-white block truncate">{plan.description}</span>
+                        <div className="flex items-center gap-2 text-[10px] text-gray-400">
+                          <span>Cuota #{installment.installmentNumber}</span>
+                          <span>•</span>
+                          <span className={isUrgent ? 'text-amber-400 font-medium' : ''}>{statusLabel} ({formattedDue})</span>
+                        </div>
+                      </div>
+                      <span className="font-bold text-white shrink-0">
+                        {formatCurrency(installment.amount, currency, privacyMode)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Close Button */}
+            <button
+              type="button"
+              onClick={() => setIsReminderModalOpen(false)}
+              className="w-full py-3 rounded-xl bg-[#5687F5] hover:bg-[#4375E6] text-white text-xs font-semibold transition-colors cursor-pointer shadow-md"
+            >
+              Listo, guardar preferencias
+            </button>
           </div>
         </div>
       )}

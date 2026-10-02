@@ -67,7 +67,7 @@ export default defineConfig(() => {
             if (id.includes('node_modules/recharts')) {
               return 'vendor-charts';
             }
-            if (id.includes('node_modules/dexie')) {
+            if (id.includes('node_modules/dexie') || id.includes('node_modules/@supabase')) {
               return 'vendor-db';
             }
             if (id.includes('node_modules/lucide-react')) {

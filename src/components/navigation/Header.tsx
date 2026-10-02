@@ -1,5 +1,5 @@
 import React from 'react';
-import { Eye, EyeOff, Bell, Calendar } from 'lucide-react';
+import { Eye, EyeOff, Bell, Calendar, User } from 'lucide-react';
 import { PWAInstallButton } from '../ui/PWAInstallButton';
 import { formatMonthLabel, getPreviousMonth, getNextMonth } from '../../lib/dates';
 
@@ -10,6 +10,9 @@ interface HeaderProps {
   onTogglePrivacy: () => void;
   unreadCount: number;
   onOpenNotifications: () => void;
+  userEmail?: string;
+  isCloudSession?: boolean;
+  onOpenAuth?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -19,6 +22,9 @@ export const Header: React.FC<HeaderProps> = ({
   onTogglePrivacy,
   unreadCount,
   onOpenNotifications,
+  userEmail,
+  isCloudSession = false,
+  onOpenAuth,
 }) => {
   return (
     <header className="sticky top-0 z-30 pt-safe bg-[#080B12]/80 backdrop-blur-xl border-b border-[#262E3D]/50 px-4 py-3">
@@ -84,6 +90,32 @@ export const Header: React.FC<HeaderProps> = ({
               </span>
             )}
           </button>
+
+          {/* User Auth Avatar / Status Button */}
+          {onOpenAuth && (
+            <button
+              onClick={onOpenAuth}
+              aria-label={isCloudSession ? `Usuario ${userEmail || ''}` : 'Iniciar sesión'}
+              className="relative w-9 h-9 rounded-2xl bg-[#171D2B] hover:bg-[#202738] active:scale-95 border border-[#262E3D] flex items-center justify-center text-[#F5F7FC] transition-all font-bold text-xs"
+              title={
+                isCloudSession
+                  ? `Conectado a Supabase: ${userEmail || 'Usuario'}`
+                  : 'Modo Local / Clic para iniciar sesión'
+              }
+            >
+              {userEmail ? (
+                userEmail.charAt(0).toUpperCase()
+              ) : (
+                <User className="w-4 h-4 text-[#929BAD]" />
+              )}
+              {/* Cloud dot */}
+              <span
+                className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-[#080B12] ${
+                  isCloudSession ? 'bg-emerald-400' : 'bg-amber-400'
+                }`}
+              />
+            </button>
+          )}
         </div>
       </div>
     </header>
