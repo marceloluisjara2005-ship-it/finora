@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <rect width="512" height="512" rx="128" fill="#080B12"/>
+  <rect x="24" y="24" width="464" height="464" rx="104" stroke="#262E3D" stroke-width="8"/>
+  <defs>
+    <linearGradient id="finoraGrad" x1="96" y1="96" x2="416" y2="416" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#5687F5"/>
+      <stop offset="0.5" stop-color="#3B82F6"/>
+      <stop offset="1" stop-color="#4ADE80"/>
+    </linearGradient>
+    <linearGradient id="glowGrad" x1="256" y1="120" x2="256" y2="392" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#5687F5" stop-opacity="0.3"/>
+      <stop offset="1" stop-color="#4ADE80" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <!-- Background Glow -->
+  <circle cx="256" cy="256" r="160" fill="url(#glowGrad)"/>
+  <!-- Stylized F and Chart lines -->
+  <path d="M160 140H352C363.046 140 372 148.954 372 160C372 171.046 363.046 180 352 180H200V236H320C331.046 236 340 244.954 340 256C340 267.046 331.046 276 320 276H200V352C200 363.046 191.046 372 180 372C168.954 372 160 363.046 160 352V140Z" fill="url(#finoraGrad)"/>
+  <!-- Trend Indicator / Growth Diamond -->
+  <path d="M360 320L400 280L360 240L320 280Z" fill="#4ADE80"/>
+</svg>

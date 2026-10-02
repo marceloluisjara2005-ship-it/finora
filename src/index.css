@@ -1,0 +1,59 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --bg-main: #080B12;
+    --bg-secondary: #101522;
+    --bg-surface: #171D2B;
+    --border-color: #262E3D;
+    --text-primary: #F5F7FC;
+    --text-secondary: #929BAD;
+    --color-income: #4ADE80;
+    --color-fixed: #FBBF24;
+    --color-variable: #60A5FA;
+    --color-ant: #D8A4FF;
+    --color-savings: #FB7185;
+    --color-primary: #5687F5;
+    --color-error: #F87171;
+    --color-warning: #FBBF24;
+  }
+
+  html, body {
+    background-color: #080B12;
+    color: #F5F7FC;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+    overscroll-behavior-y: none;
+  }
+}
+
+/* iOS Safe Areas */
+.pt-safe {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+.mb-safe {
+  margin-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Custom Scrollbar hiding for clean app feel */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Glassmorphism surface */
+.glass-surface {
+  background: rgba(23, 29, 43, 0.75);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(38, 46, 61, 0.8);
+}

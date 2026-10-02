@@ -1,0 +1,7 @@
+{
+  "name": "Finora - Contador Público Personal PWA",
+  "description": "PWA de finanzas personales y contador público personal con control de gastos, cuotas, presupuestos, modo offline y asistente financiero.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
